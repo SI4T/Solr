@@ -107,8 +107,8 @@ public enum SolrIndexDispatcher
 	{
 		File home = new File(solrHome);
 		File solrConfig = new File(home, "solr.xml");
-		CoreContainer coreContainer = new CoreContainer();
-		coreContainer.load(solrHome, solrConfig);
+		// Solr 4.4.0 change
+		CoreContainer coreContainer = CoreContainer.createAndLoad(solrHome, solrConfig);
 		EmbeddedSolrServer server = new EmbeddedSolrServer(coreContainer, coreName);
 
 		_solrServers.put(searcherId, server);
@@ -295,7 +295,8 @@ public enum SolrIndexDispatcher
 			log.debug("Removing: " + id);
 		}
 		server.deleteById(idList);
-		UpdateResponse serverrsp = server.commit();
+		server.optimize(true, true);
+		UpdateResponse serverrsp = server.commit(true, true);
 		return ("Deleting " + ids.size() + " document(s) had the following response: " + serverrsp.getResponse());
 	}
 
