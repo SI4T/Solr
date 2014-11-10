@@ -170,6 +170,7 @@ public enum SolrIndexDispatcher
 				up.addContentStream(fs);
 
 				up.setParam("literal.id", id);
+				up.setParam("literal.publicationid",data.getPublicationItemId());
 				up.setParam("literal.pubdate", "NOW");
 				up.setParam("literal.url", data.getIndexUrl().replace(" ", "%20"));
 
