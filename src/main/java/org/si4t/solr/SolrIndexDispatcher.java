@@ -20,10 +20,9 @@ import com.tridion.storage.si4t.BinaryIndexData;
 import com.tridion.storage.si4t.Utils;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.client.HttpClient;
-import org.apache.solr.client.solrj.SolrServer;
+//import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.SolrServerException;
-import org.apache.solr.client.solrj.embedded.EmbeddedSolrServer;
-import org.apache.solr.client.solrj.impl.HttpSolrServer;
+import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.client.solrj.request.ContentStreamUpdateRequest;
 import org.apache.solr.client.solrj.response.UpdateResponse;
 import org.apache.solr.common.SolrInputDocument;
@@ -44,9 +43,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * SolrIndexDispatcher.
- * 
+ *
  * Singleton. Dispatches updates to the Solr Index.
- * 
+ *
  * @author R.S. Kempees
  * @version 1.20
  * @since 1.00
@@ -54,81 +53,81 @@ import java.util.concurrent.ConcurrentHashMap;
 public enum SolrIndexDispatcher
 {
 	INSTANCE;
-	private static ConcurrentHashMap<String, SolrServer> _solrServers = new ConcurrentHashMap<String, SolrServer>();
+	private static ConcurrentHashMap<String, HttpSolrClient> _solrClient = new ConcurrentHashMap<String, HttpSolrClient>();
 	private static ConcurrentHashMap<String, CoreContainer> _solrContainers = new ConcurrentHashMap<String, CoreContainer>();
 	private static ConcurrentHashMap<String, HttpClient> _httpClients = new ConcurrentHashMap<String, HttpClient>();
 	private static Logger log = LoggerFactory.getLogger(SolrIndexDispatcher.class);
 
-	private SolrServer getSolrServer(SolrClientRequest clientRequest) throws ParserConfigurationException, IOException, SAXException
+	private HttpSolrClient getSolrClient(SolrClientRequest clientRequest) throws ParserConfigurationException, IOException, SAXException
 	{
 		switch (clientRequest.getServerMode())
 		{
-			case EMBEDDED:
-				if (_solrServers.get(clientRequest.getSearcherId()) == null)
-				{
-					log.info("Obtaining Embedded Solr server [(" + clientRequest.getSearcherId() + "): (" + clientRequest.getSolrHome() + "),(" + clientRequest.getSolrCore() + ")]");
-					this.createEmbeddedSolrServer(clientRequest.getSearcherId(), clientRequest.getSolrHome(), clientRequest.getSolrCore());
-				}
-				return _solrServers.get(clientRequest.getSearcherId());
+//			case EMBEDDED:
+//				if (_solrClient.get(clientRequest.getSearcherId()) == null)
+//				{
+//					log.info("Obtaining Embedded Solr server [(" + clientRequest.getSearcherId() + "): (" + clientRequest.getSolrHome() + "),(" + clientRequest.getSolrCore() + ")]");
+//					this.createEmbeddedSolrServer(clientRequest.getSearcherId(), clientRequest.getSolrHome(), clientRequest.getSolrCore());
+//				}
+//				return _solrClient.get(clientRequest.getSearcherId());
 
 			case HTTP:
-				if (_solrServers.get(clientRequest.getSolrUrl()) == null)
+				if (_solrClient.get(clientRequest.getSolrUrl()) == null)
 				{
 					log.info("Obtaining Http Solr server [" + clientRequest.getSolrUrl() + ": " + clientRequest.getSolrUrl());
-					this.createHttpSolrServer(clientRequest.getSolrUrl());
+					this.createHttpSolrClient(clientRequest.getSolrUrl());
 
 				}
-				return _solrServers.get(clientRequest.getSolrUrl());
+				return _solrClient.get(clientRequest.getSolrUrl());
 
 		}
 		return null;
 	}
 
-	/**
-	 * Creates the embedded solr server.
-	 * 
-	 * Use this only in special cases to for instance to first time indexing.
-	 * 
-	 * @deprecated
-	 * @param searcherId
-	 * @param solrHome
-	 * @param coreName
-	 * @throws ParserConfigurationException
-	 * @throws IOException
-	 * @throws SAXException
-	 */
-	@Deprecated
-	private void createEmbeddedSolrServer(String searcherId, String solrHome, String coreName) throws ParserConfigurationException, IOException, SAXException
-	{
-		File home = new File(solrHome);
-		File solrConfig = new File(home, "solr.xml");
-		// Solr 4.4.0 change
-		CoreContainer coreContainer = CoreContainer.createAndLoad(solrHome, solrConfig);
-		EmbeddedSolrServer server = new EmbeddedSolrServer(coreContainer, coreName);
+//	/**
+//	 * Creates the embedded solr server.
+//	 *
+//	 * Use this only in special cases to for instance to first time indexing.
+//	 *
+//	 * @deprecated
+//	 * @param searcherId
+//	 * @param solrHome
+//	 * @param coreName
+//	 * @throws ParserConfigurationException
+//	 * @throws IOException
+//	 * @throws SAXException
+//	 */
+//	@Deprecated
+//	private void createEmbeddedSolrServer(String searcherId, String solrHome, String coreName) throws ParserConfigurationException, IOException, SAXException
+//	{
+//		File home = new File(solrHome);
+//		File solrConfig = new File(home, "solr.xml");
+//		// Solr 4.4.0 change
+//		CoreContainer coreContainer = CoreContainer.createAndLoad(solrHome, solrConfig);
+//		EmbeddedSolrServer server = new EmbeddedSolrServer(coreContainer, coreName);
+//
+//		_solrClient.put(searcherId, server);
+//		_solrContainers.put(searcherId, coreContainer);
+//
+//		log.info("Created an Embedded Solr server client instance for " + searcherId + ", " + solrHome + ", " + coreName);
+//	}
 
-		_solrServers.put(searcherId, server);
-		_solrContainers.put(searcherId, coreContainer);
-
-		log.info("Created an Embedded Solr server client instance for " + searcherId + ", " + solrHome + ", " + coreName);
-	}
-
-	private void createHttpSolrServer(String url)
+	private void createHttpSolrClient(String url)
 	{
 		if (_httpClients.get(url) == null)
 		{
-			HttpSolrServer server = new HttpSolrServer(url);
+			HttpSolrClient server = new HttpSolrClient(url);
 			server.setDefaultMaxConnectionsPerHost(100);
 			HttpClient client = server.getHttpClient();
 			log.debug(">> Creating HttpClient instance");
 			_httpClients.put(url, client);
-			_solrServers.put(url, server);
+			_solrClient.put(url, server);
 		}
 		else
 		{
 			log.debug(">> Reusing existing HttpClient instance");
-			HttpSolrServer server = new HttpSolrServer(url, _httpClients.get(url));
+			HttpSolrClient server = new HttpSolrClient(url, _httpClients.get(url));
 			server.setDefaultMaxConnectionsPerHost(100);
-			_solrServers.put(url, server);
+			_solrClient.put(url, server);
 		}
 		log.info("Created a Commons Http Solr server client instance for " + url);
 	}
@@ -136,9 +135,9 @@ public enum SolrIndexDispatcher
 	public String addBinaries(ConcurrentHashMap<String, BinaryIndexData> binaryAdds, SolrClientRequest clientRequest) throws IOException, SolrServerException, ParserConfigurationException, SAXException
 	{
 
-		SolrServer server = null;
+		HttpSolrClient server;
 
-		server = this.getSolrServer(clientRequest);
+		server = this.getSolrClient(clientRequest);
 
 		if (server == null)
 		{
@@ -248,7 +247,7 @@ public enum SolrIndexDispatcher
 
 	public String addDocuments(DispatcherPackage dispatcherPackage) throws ParserConfigurationException, IOException, SAXException, SolrServerException
 	{
-		SolrServer server = this.getSolrServer(dispatcherPackage.getRequest());
+		HttpSolrClient server = this.getSolrClient(dispatcherPackage.getRequest());
 		if (server == null)
 		{
 			throw new SolrServerException("Solr server not instantiated.");
@@ -280,7 +279,7 @@ public enum SolrIndexDispatcher
 
 	public String removeFromSolr(Set<String> ids, SolrClientRequest clientRequest) throws SolrServerException, IOException, ParserConfigurationException, SAXException
 	{
-		SolrServer server = this.getSolrServer(clientRequest);
+		HttpSolrClient server = this.getSolrClient(clientRequest);
 		if (server == null)
 		{
 			throw new SolrServerException("Solr server not instantiated.");
