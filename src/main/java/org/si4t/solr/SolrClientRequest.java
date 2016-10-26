@@ -20,8 +20,6 @@ package org.si4t.solr;
  * SolrClientRequest.
  * 
  * @author R.S. Kempees
- * @version 1.20
- * @since 1.00
  */
 public class SolrClientRequest
 {
@@ -29,6 +27,7 @@ public class SolrClientRequest
 	private String solrHome;
 	private String solrCore;
 	private String solrUrl;
+	@Deprecated
 	private ServerMode serverMode;
 
 	public SolrClientRequest(String searcherId, String solrHome, String solrCore, String solrUrl, ServerMode serverMode)
@@ -85,12 +84,14 @@ public class SolrClientRequest
 		return serverMode;
 	}
 
+	@Deprecated
 	public void setServerMode(ServerMode serverMode)
 	{
 		this.serverMode = serverMode;
 	}
 
-	public static enum ServerMode
+	@Deprecated
+	public enum ServerMode
 	{
 		EMBEDDED,
 		HTTP;

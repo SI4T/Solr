@@ -16,16 +16,14 @@
 
 package org.si4t.solr;
 
-import java.util.ArrayList;
-
 import org.apache.solr.common.SolrInputDocument;
+
+import java.util.ArrayList;
 
 /**
  * DispatcherPackage.
  * 
  * @author R.S. Kempees
- * @version 1.20
- * @since 1.00
  */
 public class DispatcherPackage
 {

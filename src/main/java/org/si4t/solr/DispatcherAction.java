@@ -20,8 +20,6 @@ package org.si4t.solr;
  * DispatcherAction.
  * 
  * @author R.S. Kempees
- * @version 1.20
- * @since 1.00
  */
 public enum DispatcherAction
 {
