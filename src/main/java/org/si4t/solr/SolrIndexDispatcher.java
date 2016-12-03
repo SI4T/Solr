@@ -22,19 +22,20 @@ import org.apache.commons.io.IOUtils;
 import org.apache.http.client.HttpClient;
 import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.SolrServerException;
-import org.apache.solr.client.solrj.embedded.EmbeddedSolrServer;
 import org.apache.solr.client.solrj.impl.HttpSolrServer;
 import org.apache.solr.client.solrj.request.ContentStreamUpdateRequest;
 import org.apache.solr.client.solrj.response.UpdateResponse;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.util.ContentStreamBase.FileStream;
-import org.apache.solr.core.CoreContainer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.ParserConfigurationException;
-import java.io.*;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -48,68 +49,31 @@ import java.util.concurrent.ConcurrentHashMap;
  * Singleton. Dispatches updates to the Solr Index.
  * 
  * @author R.S. Kempees
- * @version 1.20
- * @since 1.00
  */
 public enum SolrIndexDispatcher
 {
 	INSTANCE;
-	private static ConcurrentHashMap<String, SolrServer> _solrServers = new ConcurrentHashMap<String, SolrServer>();
-	private static ConcurrentHashMap<String, CoreContainer> _solrContainers = new ConcurrentHashMap<String, CoreContainer>();
-	private static ConcurrentHashMap<String, HttpClient> _httpClients = new ConcurrentHashMap<String, HttpClient>();
-	private static Logger log = LoggerFactory.getLogger(SolrIndexDispatcher.class);
+	private static ConcurrentHashMap<String, SolrServer> _solrServers = new ConcurrentHashMap<>();
+	private static ConcurrentHashMap<String, HttpClient> _httpClients = new ConcurrentHashMap<>();
+	private static final Logger LOG = LoggerFactory.getLogger(SolrIndexDispatcher.class);
 
-	private SolrServer getSolrServer(SolrClientRequest clientRequest) throws ParserConfigurationException, IOException, SAXException
-	{
+	private SolrServer getSolrServer(SolrClientRequest clientRequest) throws ParserConfigurationException, IOException, SAXException, SolrServerException {
 		switch (clientRequest.getServerMode())
 		{
 			case EMBEDDED:
-				if (_solrServers.get(clientRequest.getSearcherId()) == null)
-				{
-					log.info("Obtaining Embedded Solr server [(" + clientRequest.getSearcherId() + "): (" + clientRequest.getSolrHome() + "),(" + clientRequest.getSolrCore() + ")]");
-					this.createEmbeddedSolrServer(clientRequest.getSearcherId(), clientRequest.getSolrHome(), clientRequest.getSolrCore());
-				}
-				return _solrServers.get(clientRequest.getSearcherId());
+				throw new SolrServerException("Embedded Connections are not supported anymore. Change your configuration to use HTTP");
 
 			case HTTP:
+			default:
 				if (_solrServers.get(clientRequest.getSolrUrl()) == null)
 				{
-					log.info("Obtaining Http Solr server [" + clientRequest.getSolrUrl() + ": " + clientRequest.getSolrUrl());
+					LOG.info("Obtaining Http Solr server [" + clientRequest.getSolrUrl() + ": " + clientRequest.getSolrUrl());
 					this.createHttpSolrServer(clientRequest.getSolrUrl());
 
 				}
 				return _solrServers.get(clientRequest.getSolrUrl());
 
 		}
-		return null;
-	}
-
-	/**
-	 * Creates the embedded solr server.
-	 * 
-	 * Use this only in special cases to for instance to first time indexing.
-	 * 
-	 * @deprecated
-	 * @param searcherId
-	 * @param solrHome
-	 * @param coreName
-	 * @throws ParserConfigurationException
-	 * @throws IOException
-	 * @throws SAXException
-	 */
-	@Deprecated
-	private void createEmbeddedSolrServer(String searcherId, String solrHome, String coreName) throws ParserConfigurationException, IOException, SAXException
-	{
-		File home = new File(solrHome);
-		File solrConfig = new File(home, "solr.xml");
-		// Solr 4.4.0 change
-		CoreContainer coreContainer = CoreContainer.createAndLoad(solrHome, solrConfig);
-		EmbeddedSolrServer server = new EmbeddedSolrServer(coreContainer, coreName);
-
-		_solrServers.put(searcherId, server);
-		_solrContainers.put(searcherId, coreContainer);
-
-		log.info("Created an Embedded Solr server client instance for " + searcherId + ", " + solrHome + ", " + coreName);
 	}
 
 	private void createHttpSolrServer(String url)
@@ -119,24 +83,23 @@ public enum SolrIndexDispatcher
 			HttpSolrServer server = new HttpSolrServer(url);
 			server.setDefaultMaxConnectionsPerHost(100);
 			HttpClient client = server.getHttpClient();
-			log.debug(">> Creating HttpClient instance");
+			LOG.debug(">> Creating HttpClient instance");
 			_httpClients.put(url, client);
 			_solrServers.put(url, server);
 		}
 		else
 		{
-			log.debug(">> Reusing existing HttpClient instance");
+			LOG.debug(">> Reusing existing HttpClient instance");
 			HttpSolrServer server = new HttpSolrServer(url, _httpClients.get(url));
 			server.setDefaultMaxConnectionsPerHost(100);
 			_solrServers.put(url, server);
 		}
-		log.info("Created a Commons Http Solr server client instance for " + url);
+		LOG.info("Created a Commons Http Solr server client instance for " + url);
 	}
 
-	public String addBinaries(ConcurrentHashMap<String, BinaryIndexData> binaryAdds, SolrClientRequest clientRequest) throws IOException, SolrServerException, ParserConfigurationException, SAXException
-	{
+	public String addBinaries(ConcurrentHashMap<String, BinaryIndexData> binaryAdds, SolrClientRequest clientRequest) throws IOException, SolrServerException, ParserConfigurationException, SAXException {
 
-		SolrServer server = null;
+		SolrServer server;
 
 		server = this.getSolrServer(clientRequest);
 
@@ -151,7 +114,7 @@ public enum SolrIndexDispatcher
 		{
 			BinaryIndexData data = entry.getValue();
 
-			log.debug("Dispatching binary content to Solr.");
+			LOG.debug("Dispatching binary content to Solr.");
 
 			FileStream fs = this.getBinaryInputStream(data);
 
@@ -159,7 +122,7 @@ public enum SolrIndexDispatcher
 			{
 
 				String id = data.getUniqueIndexId();
-				log.info("Indexing binary with Id: " + id + ", and URL Path:" + data.getIndexUrl());
+				LOG.info("Indexing binary with Id: " + id + ", and URL Path:" + data.getIndexUrl());
 				ContentStreamUpdateRequest up = new ContentStreamUpdateRequest("/update/extract");
 
 				up.addContentStream(fs);
@@ -184,7 +147,7 @@ public enum SolrIndexDispatcher
 				serverrsp = up.process(server);
 				rsp.append(serverrsp.getResponse());
 
-				log.info("Committing adding binaries.");
+				LOG.info("Committing adding binaries.");
 				rsp.append("\n");
 
 				serverrsp = server.commit();
@@ -194,7 +157,7 @@ public enum SolrIndexDispatcher
 			}
 			else
 			{
-				log.error("Could not process binary: " + data.getIndexUrl());
+				LOG.error("Could not process binary: " + data.getIndexUrl());
 			}
 		}
 		return ("Adding binaries had the following response: " + rspResponse);
@@ -215,39 +178,28 @@ public enum SolrIndexDispatcher
 		try
 		{
 			tempBinaryFile = File.createTempFile(fileName, fileExtension, null);
-			log.trace("File created: " + tempBinaryFile.getAbsolutePath());
+			LOG.trace("File created: " + tempBinaryFile.getAbsolutePath());
 			tempBinaryFile.deleteOnExit();
 			out = new FileOutputStream(tempBinaryFile);
 			IOUtils.write(data.getContent().getContent(), out);
-			log.trace("IOUtils is done writing binary content.");
-		}
-		catch (FileNotFoundException e)
+			LOG.trace("IOUtils is done writing binary content.");
+		} catch (IOException e)
 		{
-			this.logException(e);
-			throw e;
-		}
-		catch (IOException e)
-		{
-			this.logException(e);
+			LOG.error(e.getLocalizedMessage(),e);
 			throw e;
 		}
 		finally
 		{
-			tempBinaryFile.deleteOnExit();
+			if ( tempBinaryFile != null ) {
+				tempBinaryFile.deleteOnExit();
+			}
 			IOUtils.closeQuietly(out);
 		}
 
 		return new FileStream(tempBinaryFile);
 	}
 
-	private void logException(Exception e)
-	{
-		log.error(e.getMessage());
-		log.error(Utils.stacktraceToString(e.getStackTrace()));
-	}
-
-	public String addDocuments(DispatcherPackage dispatcherPackage) throws ParserConfigurationException, IOException, SAXException, SolrServerException
-	{
+	public String addDocuments(DispatcherPackage dispatcherPackage) throws ParserConfigurationException, IOException, SAXException, SolrServerException {
 		SolrServer server = this.getSolrServer(dispatcherPackage.getRequest());
 		if (server == null)
 		{
@@ -264,11 +216,11 @@ public enum SolrIndexDispatcher
 		{
 			if (d == null || d.isEmpty())
 			{
-				log.error("Document is null Or empty");
+				LOG.error("Document is null Or empty");
 			}
 			else
 			{
-				log.info(Utils.RemoveLineBreaks(d.toString()));
+				LOG.info(Utils.RemoveLineBreaks(d.toString()));
 				server.add(d);
 			}
 		}
@@ -278,42 +230,31 @@ public enum SolrIndexDispatcher
 		return ("Processing " + documents.size() + " documents had the following response: " + serverrsp.getResponse());
 	}
 
-	public String removeFromSolr(Set<String> ids, SolrClientRequest clientRequest) throws SolrServerException, IOException, ParserConfigurationException, SAXException
-	{
+	public String removeFromSolr(Set<String> ids, SolrClientRequest clientRequest) throws SolrServerException, IOException, ParserConfigurationException, SAXException {
 		SolrServer server = this.getSolrServer(clientRequest);
 		if (server == null)
 		{
 			throw new SolrServerException("Solr server not instantiated.");
 		}
-		ArrayList<String> idList = new ArrayList<String>(ids);
+		ArrayList<String> idList = new ArrayList<>(ids);
 		for (String id : idList)
 		{
-			log.debug("Removing: " + id);
+			LOG.debug("Removing: " + id);
 		}
 		server.deleteById(idList);
 		server.optimize(true, true);
-		UpdateResponse serverrsp = server.commit(true, true);
-		return ("Deleting " + ids.size() + " document(s) had the following response: " + serverrsp.getResponse());
+		UpdateResponse response = server.commit(true, true);
+		return ("Deleting " + ids.size() + " document(s) had the following response: " + response.getResponse());
 	}
 
 	public void destroyServers()
 	{
-		for (Entry<String, CoreContainer> entry : _solrContainers.entrySet())
-		{
-			CoreContainer c = entry.getValue();
-			if (c != null)
-			{
-				log.info("Shutting down CoreContainer for searcher: " + entry.getKey());
-				c.shutdown();
-			}
-		}
-
 		for (Entry<String, HttpClient> clients : _httpClients.entrySet())
 		{
 			HttpClient client = clients.getValue();
 			if (client != null)
 			{
-				log.info("Closing down HttpClient for url: " + clients.getKey());
+				LOG.info("Closing down HttpClient for url: " + clients.getKey());
 				client.getConnectionManager().shutdown();
 			}
 		}
