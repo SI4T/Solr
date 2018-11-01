@@ -20,9 +20,9 @@ import com.tridion.storage.si4t.BinaryIndexData;
 import com.tridion.storage.si4t.Utils;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.client.HttpClient;
-import org.apache.solr.client.solrj.SolrServer;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.solr.client.solrj.SolrServerException;
-import org.apache.solr.client.solrj.impl.HttpSolrServer;
+import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.client.solrj.request.ContentStreamUpdateRequest;
 import org.apache.solr.client.solrj.response.UpdateResponse;
 import org.apache.solr.common.SolrInputDocument;
@@ -53,11 +53,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public enum SolrIndexDispatcher
 {
 	INSTANCE;
-	private static ConcurrentHashMap<String, SolrServer> _solrServers = new ConcurrentHashMap<>();
+	private static ConcurrentHashMap<String, HttpSolrClient> _solrServers = new ConcurrentHashMap<>();
 	private static ConcurrentHashMap<String, HttpClient> _httpClients = new ConcurrentHashMap<>();
 	private static final Logger LOG = LoggerFactory.getLogger(SolrIndexDispatcher.class);
 
-	private SolrServer getSolrServer(SolrClientRequest clientRequest) throws ParserConfigurationException, IOException, SAXException, SolrServerException {
+	private HttpSolrClient getSolrServer(SolrClientRequest clientRequest) throws SolrServerException {
 		switch (clientRequest.getServerMode())
 		{
 			case EMBEDDED:
@@ -80,30 +80,33 @@ public enum SolrIndexDispatcher
 	{
 		if (_httpClients.get(url) == null)
 		{
-			HttpSolrServer server = new HttpSolrServer(url);
-			server.setDefaultMaxConnectionsPerHost(100);
-			HttpClient client = server.getHttpClient();
+
+			final HttpSolrClient solrClient = new HttpSolrClient.Builder(url)
+					.withHttpClient(HttpClientBuilder.create().setMaxConnPerRoute(100).build()).build();
+			final HttpClient client = solrClient.getHttpClient();
+
 			LOG.debug(">> Creating HttpClient instance");
 			_httpClients.put(url, client);
-			_solrServers.put(url, server);
+			_solrServers.put(url, solrClient);
 		}
 		else
 		{
 			LOG.debug(">> Reusing existing HttpClient instance");
-			HttpSolrServer server = new HttpSolrServer(url, _httpClients.get(url));
-			server.setDefaultMaxConnectionsPerHost(100);
-			_solrServers.put(url, server);
+
+			final HttpSolrClient solrClient = new HttpSolrClient.Builder(url)
+					.withHttpClient(_httpClients.get(url)).build();
+			_solrServers.put(url, solrClient);
 		}
 		LOG.info("Created a Commons Http Solr server client instance for " + url);
 	}
 
-	public String addBinaries(ConcurrentHashMap<String, BinaryIndexData> binaryAdds, SolrClientRequest clientRequest) throws IOException, SolrServerException, ParserConfigurationException, SAXException {
+	public String addBinaries(ConcurrentHashMap<String, BinaryIndexData> binaryAdds, SolrClientRequest clientRequest) throws IOException, SolrServerException {
 
-		SolrServer server;
+		HttpSolrClient solrClient;
 
-		server = this.getSolrServer(clientRequest);
+		solrClient = this.getSolrServer(clientRequest);
 
-		if (server == null)
+		if (solrClient == null)
 		{
 			throw new SolrServerException("Solr server not instantiated.");
 		}
@@ -118,47 +121,39 @@ public enum SolrIndexDispatcher
 
 			FileStream fs = this.getBinaryInputStream(data);
 
-			if (fs != null)
-			{
+			String id = data.getUniqueIndexId();
+			LOG.info("Indexing binary with Id: " + id + ", and URL Path:" + data.getIndexUrl());
+			ContentStreamUpdateRequest up = new ContentStreamUpdateRequest("/update/extract");
 
-				String id = data.getUniqueIndexId();
-				LOG.info("Indexing binary with Id: " + id + ", and URL Path:" + data.getIndexUrl());
-				ContentStreamUpdateRequest up = new ContentStreamUpdateRequest("/update/extract");
+			up.addContentStream(fs);
 
-				up.addContentStream(fs);
+			up.setParam("literal.id", id);
+			up.setParam("literal.publicationid",data.getPublicationItemId());
+			up.setParam("literal.pubdate", "NOW");
+			up.setParam("literal.url", data.getIndexUrl().replace(" ", "%20"));
 
-				up.setParam("literal.id", id);
-				up.setParam("literal.publicationid",data.getPublicationItemId());
-				up.setParam("literal.pubdate", "NOW");
-				up.setParam("literal.url", data.getIndexUrl().replace(" ", "%20"));
+			if (!Utils.StringIsNullOrEmpty(data.getFileSize()))
+            {
+                up.setParam("literal.fileSize", data.getFileSize());
+            }
+			if (!Utils.StringIsNullOrEmpty(data.getFileType()))
+            {
+                up.setParam("literal.fileType", data.getFileType());
+            }
+			up.setParam("defaultField", "binary_content");
 
-				if (!Utils.StringIsNullOrEmpty(data.getFileSize()))
-				{
-					up.setParam("literal.fileSize", data.getFileSize());
-				}
-				if (!Utils.StringIsNullOrEmpty(data.getFileType()))
-				{
-					up.setParam("literal.fileType", data.getFileType());
-				}
-				up.setParam("defaultField", "binary_content");
+			UpdateResponse serverrsp;
 
-				UpdateResponse serverrsp;
+			serverrsp = up.process(solrClient);
+			rsp.append(serverrsp.getResponse());
 
-				serverrsp = up.process(server);
-				rsp.append(serverrsp.getResponse());
+			LOG.info("Committing adding binaries.");
+			rsp.append("\n");
 
-				LOG.info("Committing adding binaries.");
-				rsp.append("\n");
+			serverrsp = solrClient.commit();
+			rsp.append(serverrsp.getResponse());
 
-				serverrsp = server.commit();
-				rsp.append(serverrsp.getResponse());
-
-				rspResponse = rsp.toString();
-			}
-			else
-			{
-				LOG.error("Could not process binary: " + data.getIndexUrl());
-			}
+			rspResponse = rsp.toString();
 		}
 		return ("Adding binaries had the following response: " + rspResponse);
 	}
@@ -200,8 +195,8 @@ public enum SolrIndexDispatcher
 	}
 
 	public String addDocuments(DispatcherPackage dispatcherPackage) throws ParserConfigurationException, IOException, SAXException, SolrServerException {
-		SolrServer server = this.getSolrServer(dispatcherPackage.getRequest());
-		if (server == null)
+		HttpSolrClient solrClient = this.getSolrServer(dispatcherPackage.getRequest());
+		if (solrClient == null)
 		{
 			throw new SolrServerException("Solr server not instantiated.");
 		}
@@ -221,18 +216,18 @@ public enum SolrIndexDispatcher
 			else
 			{
 				LOG.info(Utils.RemoveLineBreaks(d.toString()));
-				server.add(d);
+				solrClient.add(d);
 			}
 		}
 
-		UpdateResponse serverrsp = server.commit(true, true);
+		UpdateResponse serverrsp = solrClient.commit(true, true);
 
 		return ("Processing " + documents.size() + " documents had the following response: " + serverrsp.getResponse());
 	}
 
 	public String removeFromSolr(Set<String> ids, SolrClientRequest clientRequest) throws SolrServerException, IOException, ParserConfigurationException, SAXException {
-		SolrServer server = this.getSolrServer(clientRequest);
-		if (server == null)
+		HttpSolrClient solrClient = this.getSolrServer(clientRequest);
+		if (solrClient == null)
 		{
 			throw new SolrServerException("Solr server not instantiated.");
 		}
@@ -241,9 +236,9 @@ public enum SolrIndexDispatcher
 		{
 			LOG.debug("Removing: " + id);
 		}
-		server.deleteById(idList);
-		server.optimize(true, true);
-		UpdateResponse response = server.commit(true, true);
+		solrClient.deleteById(idList);
+		solrClient.optimize(true, true);
+		UpdateResponse response = solrClient.commit(true, true);
 		return ("Deleting " + ids.size() + " document(s) had the following response: " + response.getResponse());
 	}
 
