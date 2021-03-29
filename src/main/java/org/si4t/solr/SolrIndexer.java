@@ -316,6 +316,10 @@ public class SolrIndexer implements SearchIndex
 			LOG.error(e.getLocalizedMessage(),e);
 			throw new IndexingException("Configuration Exception:" + e.getMessage());
 		}
+		catch (Throwable e) {
+			LOG.error("Unexpected exception: " + e.getLocalizedMessage(),e);
+			throw new IndexingException("Unexpected exception:" + e.getMessage());
+		}
 		finally
 		{
 			LOG.info("Clearing out registers.");
@@ -326,9 +330,13 @@ public class SolrIndexer implements SearchIndex
 	private void clearRegisters()
 	{
 		itemAdds.clear();
+		LOG.debug("cleared item register");
 		binaryAdds.clear();
+		LOG.debug("cleared binary register");
 		itemRemovals.clear();
+		LOG.debug("cleared removal register");
 		itemUpdates.clear();
+		LOG.debug("cleared update register");
 	}
 
 	/**
