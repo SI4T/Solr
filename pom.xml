@@ -6,7 +6,7 @@
 
     <groupId>org.si4t</groupId>
     <artifactId>si4t-solr</artifactId>
-    <version>1.3-SNAPSHOT</version>
+    <version>1.3</version>
     <properties>
         <solrj.version>8.8.1</solrj.version>
         <si4t.version>1.4</si4t.version>
