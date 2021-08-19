@@ -105,6 +105,7 @@ public enum SolrIndexDispatcher
 		HttpSolrClient solrClient;
 
 		solrClient = this.getSolrServer(clientRequest);
+		LOG.debug("about to add binaries with solr url " + clientRequest.getSolrUrl());
 
 		if (solrClient == null)
 		{
@@ -117,7 +118,7 @@ public enum SolrIndexDispatcher
 		{
 			BinaryIndexData data = entry.getValue();
 
-			LOG.debug("Dispatching binary content to Solr.");
+			LOG.debug("Dispatching binary content to Solr with key " + entry.getKey());
 
 			FileStream fs = this.getBinaryInputStream(data);
 
