@@ -24,12 +24,26 @@ package org.si4t.solr;
 public class SolrClientRequest
 {
 	private String searcherId;
-	private String solrHome;
-	private String solrCore;
 	private String solrUrl;
+
+	@Deprecated
+	private String solrHome;
+	@Deprecated
+	private String solrCore;
+
 	@Deprecated
 	private ServerMode serverMode;
 
+	public SolrClientRequest(String solrUrl)
+	{
+		this.searcherId = "";
+		this.solrHome = "";
+		this.solrCore = "";
+		this.solrUrl = solrUrl;
+		this.serverMode = ServerMode.HTTP;
+	}
+
+	@Deprecated
 	public SolrClientRequest(String searcherId, String solrHome, String solrCore, String solrUrl, ServerMode serverMode)
 	{
 		this.searcherId = searcherId;
