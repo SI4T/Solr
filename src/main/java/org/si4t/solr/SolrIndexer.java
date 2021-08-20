@@ -18,10 +18,14 @@ package org.si4t.solr;
 
 import com.tridion.configuration.Configuration;
 import com.tridion.configuration.ConfigurationException;
-import com.tridion.storage.si4t.*;
+import com.tridion.storage.si4t.BaseIndexData;
+import com.tridion.storage.si4t.BinaryIndexData;
+import com.tridion.storage.si4t.IndexingException;
+import com.tridion.storage.si4t.SearchIndex;
+import com.tridion.storage.si4t.SearchIndexData;
+import com.tridion.storage.si4t.Utils;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.common.SolrInputDocument;
-import org.si4t.solr.SolrClientRequest.ServerMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.SAXException;
@@ -29,10 +33,10 @@ import org.xml.sax.SAXException;
 import javax.xml.parsers.ParserConfigurationException;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * SolrIndexer.
@@ -43,41 +47,29 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class SolrIndexer implements SearchIndex {
     private static final Logger LOG = LoggerFactory.getLogger(SolrIndexer.class);
-    private String solrHome = null;
-    private String coreName = null;
-    private String solrServerUrl = null;
-    private SolrClientRequest.ServerMode solrServerMode = SolrClientRequest.ServerMode.HTTP;
-    private List<Configuration> solrCores = null;
-    private List<Configuration> solrUrls = null;
+
     private String defaultCoreUrl = null;
-    private ConcurrentHashMap<String, BaseIndexData> itemRemovals = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<String, SearchIndexData> itemAdds = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<String, BinaryIndexData> binaryAdds = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<String, SearchIndexData> itemUpdates = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<String, String> solrUrlMap = new ConcurrentHashMap<>();
 
-    private void setCoreNameAndSolrHome(String pubId) throws ConfigurationException {
-        if (this.solrCores != null && !Utils.StringIsNullOrEmpty(pubId)) {
-            for (Configuration core : this.solrCores) {
-                if (core.hasAttribute("Id")) {
-                    if (core.getAttribute("Id") != null) {
-                        if (core.getAttribute("Id").equalsIgnoreCase(pubId)) {
-                            if (core.getAttribute("Name") != null) {
-                                this.coreName = core.getAttribute("Name");
-                                LOG.info("Using [" + this.coreName + "] as Solr core.");
+    private final ConcurrentHashMap<String, BaseIndexData> itemRemovals = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, SearchIndexData> itemAdds = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, BinaryIndexData> binaryAdds = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, SearchIndexData> itemUpdates = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> solrUrlMap = new ConcurrentHashMap<>();
 
-                            }
-                            if (core.getAttribute("SolrHome") != null) {
-                                this.solrHome = core.getAttribute("SolrHome");
-                                LOG.info("Using [" + this.solrHome + "] as Solr Home.");
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
+
+    private String getSolrUrl(String publicationId) throws ConfigurationException {
+
+        if (solrUrlMap.containsKey(publicationId)) {
+            return solrUrlMap.get(publicationId);
         }
-        throw new ConfigurationException("Could not find a Solr core or Solr Home for Publication Id: " + pubId);
+
+        if (!Utils.StringIsNullOrEmpty(this.defaultCoreUrl)) {
+            return this.defaultCoreUrl;
+        }
+
+        throw new ConfigurationException(
+                "Mode is HTTP, but could not find a Url, including a default Url for " + "publication id: " +
+                        publicationId);
     }
 
     /*
@@ -89,7 +81,6 @@ public class SolrIndexer implements SearchIndex {
 
     @Override
     public void configure(Configuration configuration) throws ConfigurationException {
-        LOG.debug("Version 1.3.1-logging");
         LOG.debug("Configuration is: " + configuration.toString());
         Configuration indexerConfiguration = configuration.getChild("Indexer");
 
@@ -99,11 +90,9 @@ public class SolrIndexer implements SearchIndex {
         }
 
         if (requestMode.equalsIgnoreCase("http")) {
-            this.solrServerMode = ServerMode.HTTP;
-            List<Configuration> solrUrls = indexerConfiguration.getChild("Urls").getChildren();
 
-            if (solrUrls != null) {
-                for (Configuration url : solrUrls) {
+            if (indexerConfiguration.hasChild("Urls") && indexerConfiguration.getChild("Urls") != null) {
+                for (Configuration url : indexerConfiguration.getChild("Urls").getChildren()) {
                     if (url.hasAttribute("Id")) {
                         if (url.getAttribute("Id") != null) {
                             solrUrlMap.put(url.getAttribute("Id"), url.getAttribute("Value"));
@@ -113,20 +102,24 @@ public class SolrIndexer implements SearchIndex {
             }
 
             if (indexerConfiguration.hasAttribute("DefaultCoreUrl")) {
-                String defaultCoreUrl = indexerConfiguration.getAttribute("DefaultCoreUrl");
+                this.defaultCoreUrl = indexerConfiguration.getAttribute("DefaultCoreUrl");
 
-                if (!Utils.StringIsNullOrEmpty(defaultCoreUrl)) {
-                    LOG.info("Setting defaultCoreUrl to: " + defaultCoreUrl);
-                    solrUrlMap.put("_DEFAULT_", defaultCoreUrl);
+                if (!Utils.StringIsNullOrEmpty(this.defaultCoreUrl)) {
+                    LOG.info("Setting defaultCoreUrl to: " + this.defaultCoreUrl);
                 }
             }
 
-            if (solrUrlMap.isEmpty()) {
-                throw new ConfigurationException("Request mode is set to HTTP, but no valid Url collection or the DefaultCoreUrl is present. Set the Urls collection in the Indexer configuration node, or add the DeafultCoreAttribute to the IndexerConfiguration");
+            if ((this.solrUrlMap.isEmpty()) && Utils.StringIsNullOrEmpty(this.defaultCoreUrl)) {
+                throw new ConfigurationException(
+                        "Request mode is set to HTTP, but no valid Url collection or the DefaultCoreUrl is present. " +
+                                "Set the Urls collection in the Indexer configuration node, or add the " +
+                                "DeafultCoreAttribute to the IndexerConfiguration");
             }
 
         } else if (requestMode.equalsIgnoreCase("embedded")) {
-            throw new ConfigurationException("Request mode is set to embedded, but this deprecated feature is now removed. Please use the HTTP option.");
+            throw new ConfigurationException(
+                    "Request mode is set to embedded, but this deprecated feature is now removed. Please use the HTTP" +
+                            " option.");
         }
     }
 
@@ -216,17 +209,6 @@ public class SolrIndexer implements SearchIndex {
 
     }
 
-
-    private String getSolrUrl(String publicationId) throws IndexingException {
-        if (solrUrlMap.containsKey(publicationId)) {
-            return solrUrlMap.get(publicationId);
-        }
-        if (solrUrlMap.containsKey("_DEFAULT_")) {
-            return solrUrlMap.get("_DEFAULT_");
-        }
-        throw new IndexingException("Solr Server Exception: no solr url found for publication " + publicationId);
-    }
-
     /*
      * (non-Javadoc)
      * @see com.tridion.storage.si4t.SearchIndex#commit()
@@ -237,14 +219,7 @@ public class SolrIndexer implements SearchIndex {
 
             String solrUrl = getSolrUrl(publicationId);
             LOG.debug("found solr url " + solrUrl + " for publication ID " + publicationId);
-            String listOfUris = "";
-            for (Map.Entry<String,SearchIndexData> entry : itemAdds.entrySet()) {
-                LOG.debug("itemsToAdd contains: " + entry.getKey() + ", item id " + entry.getValue().getUniqueIndexId());
-            }
-            for (Map.Entry<String,SearchIndexData> entry : itemUpdates.entrySet()) {
-                listOfUris += entry.getValue().getUniqueIndexId() + ",";
-            }
-            LOG.debug("itemUpdates contains: " + listOfUris);
+            debugLogItems();
 
             this.commitAddContentToSolr(this.itemAdds, solrUrl);
             this.commitAddBinariesToSolr(solrUrl);
@@ -272,6 +247,37 @@ public class SolrIndexer implements SearchIndex {
         }
     }
 
+    private void debugLogItems() {
+
+        if (LOG.isDebugEnabled()) {
+
+            String itemsInItemAdds = itemAdds.entrySet().stream()
+                    .map(entry -> "key: " + entry.getKey() + ", val:" + entry.getValue().getUniqueIndexId())
+                    .collect(Collectors.joining(","));
+
+            LOG.debug("itemsToAdd contains: {}", itemsInItemAdds);
+
+            String itemsInItemUpdates = itemUpdates.entrySet().stream()
+                    .map(entry -> "key: " + entry.getKey() + ", val:" + entry.getValue().getUniqueIndexId())
+                    .collect(Collectors.joining(","));
+
+            LOG.debug("itemUpdates contains: {}", itemsInItemUpdates);
+
+            String itemsInBinaryAdds = binaryAdds.entrySet().stream()
+                    .map(entry -> "key: " + entry.getKey() + ", val:" + entry.getValue().getUniqueIndexId())
+                    .collect(Collectors.joining(","));
+
+            LOG.debug("binaryAdds contains: {}", itemsInBinaryAdds);
+
+            String itemsInItemRemovals = itemRemovals.entrySet().stream()
+                    .map(entry -> "key: " + entry.getKey() + ", val:" + entry.getValue().getUniqueIndexId())
+                    .collect(Collectors.joining(","));
+
+            LOG.debug("binaryAdds contains: {}", itemsInItemRemovals);
+
+        }
+    }
+
     private void clearRegisters() {
         itemAdds.clear();
         LOG.debug("cleared item register");
@@ -291,35 +297,27 @@ public class SolrIndexer implements SearchIndex {
      * an update is essentially the same as an addition.
      * Partial updates can be implemented here if the need arises
      *
-     * @throws ParserConfigurationException
-     * @throws IOException
-     * @throws SAXException
-     * @throws SolrServerException
+     * @throws ParserConfigurationException ParserConfigurationException
+     * @throws IOException                  IOException
+     * @throws SAXException                 SAXException
+     * @throws SolrServerException          SolrServerException
      */
-    private void processItemUpdates(String solrUrl) throws ParserConfigurationException, IOException, SAXException, SolrServerException {
+    private void processItemUpdates(String solrUrl)
+            throws ParserConfigurationException, IOException, SAXException, SolrServerException {
         this.commitAddContentToSolr(this.itemUpdates, solrUrl);
     }
 
-    private void commitAddBinariesToSolr(String solrUrl) throws SolrServerException, IOException, ParserConfigurationException, SAXException, IndexingException {
+    private void commitAddBinariesToSolr(String solrUrl)
+            throws SolrServerException, IOException, ParserConfigurationException, SAXException {
         if (this.binaryAdds.size() > 0) {
             LOG.info("Adding binaries to Solr.");
 
-            LOG.info
-                    (
-                            SolrIndexDispatcher.INSTANCE.
-                                    addBinaries(binaryAdds,
-                                            new SolrClientRequest(
-                                                    this.solrHome + "-" + this.coreName,
-                                                    this.solrHome,
-                                                    this.coreName,
-                                                    solrUrl,
-                                                    this.solrServerMode)
-                                    )
-                    );
+            LOG.info(SolrIndexDispatcher.INSTANCE.addBinaries(binaryAdds, new SolrClientRequest(solrUrl)));
         }
     }
 
-    private void commitAddContentToSolr(ConcurrentHashMap<String, SearchIndexData> itemsToAdd, String solrUrl) throws SolrServerException, IOException, ParserConfigurationException, SAXException {
+    private void commitAddContentToSolr(ConcurrentHashMap<String, SearchIndexData> itemsToAdd, String solrUrl)
+            throws SolrServerException, IOException, ParserConfigurationException, SAXException {
         int itemAddsize = itemsToAdd.size();
         if (itemAddsize > 0) {
             LOG.info("Adding pages and component presentations to Solr in batches of 10");
@@ -335,7 +333,7 @@ public class SolrIndexer implements SearchIndex {
                     groupedDocuments.add(new ArrayList<>());
                 }
                 SearchIndexData data = entry.getValue();
-                groupedDocuments.get(step).add(constructInputDocument(data, LOG));
+                groupedDocuments.get(step).add(constructInputDocument(data));
                 i++;
             }
             LOG.trace(groupedDocuments.toString());
@@ -343,34 +341,23 @@ public class SolrIndexer implements SearchIndex {
         }
     }
 
-    private void dispatchAddContentToSolr(ArrayList<ArrayList<SolrInputDocument>> groupedDocuments, String solrUrl) throws ParserConfigurationException, IOException, SAXException, SolrServerException {
+    private void dispatchAddContentToSolr(ArrayList<ArrayList<SolrInputDocument>> groupedDocuments, String solrUrl)
+            throws ParserConfigurationException, IOException, SAXException, SolrServerException {
         LOG.info("Dispatching documents in " + groupedDocuments.size() + " steps.");
 
         for (ArrayList<SolrInputDocument> documents : groupedDocuments) {
             if (documents.size() > 0) {
-                DispatcherPackage dispatcherPackage = new DispatcherPackage
-                        (
-                                DispatcherAction.PERSIST,
-                                new SolrClientRequest(
-                                        this.solrHome + "-" + this.coreName,
-                                        this.solrHome,
-                                        this.coreName,
-                                        solrUrl,
-                                        this.solrServerMode),
-                                documents
-                        );
-                LOG.info
-                        (
-                                SolrIndexDispatcher.INSTANCE.addDocuments(dispatcherPackage)
-                        );
+                DispatcherPackage dispatcherPackage =
+                        new DispatcherPackage(DispatcherAction.PERSIST, new SolrClientRequest(solrUrl), documents);
+                LOG.info(SolrIndexDispatcher.INSTANCE.addDocuments(dispatcherPackage));
             }
         }
     }
 
-    private static SolrInputDocument constructInputDocument(SearchIndexData data, Logger log) {
+    private static SolrInputDocument constructInputDocument(SearchIndexData data) {
         SolrInputDocument doc = new SolrInputDocument();
         doc.addField("pubdate", "NOW");
-        log.info("Adding Id: " + data.getUniqueIndexId());
+        LOG.info("Adding Id: " + data.getUniqueIndexId());
         doc.addField("id", data.getUniqueIndexId());
 
         ConcurrentHashMap<String, ArrayList<Object>> fieldList = data.getIndexFields();
@@ -379,28 +366,17 @@ public class SolrIndexer implements SearchIndex {
             String fieldName = fieldEntry.getKey();
             for (Object o : fieldEntry.getValue()) {
                 doc.addField(fieldName, o);
-                log.trace("Adding: " + fieldName + ": " + o);
+                LOG.trace("Adding: " + fieldName + ": " + o);
             }
         }
         return doc;
     }
 
-    private void removeItemsFromSolr(String solrUrl) throws SolrServerException, IOException, ParserConfigurationException, SAXException, IndexingException {
+    private void removeItemsFromSolr(String solrUrl)
+            throws SolrServerException, IOException, ParserConfigurationException, SAXException {
         if (this.itemRemovals.size() > 0) {
-            LOG.info
-                    (
-                            SolrIndexDispatcher.INSTANCE.removeFromSolr(
-                                    this.itemRemovals.keySet(),
-                                    new SolrClientRequest
-                                            (
-                                                    this.solrHome + "-" + this.coreName,
-                                                    this.solrHome,
-                                                    this.coreName,
-                                                    solrUrl,
-                                                    this.solrServerMode
-                                            )
-                            )
-                    );
+            LOG.info(SolrIndexDispatcher.INSTANCE
+                    .removeFromSolr(this.itemRemovals.keySet(), new SolrClientRequest(solrUrl)));
         }
     }
 
