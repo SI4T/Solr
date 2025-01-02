@@ -9,7 +9,7 @@
     <version>1.4-SNAPSHOT</version>
     <properties>
         <solrj.version>8.8.1</solrj.version>
-        <si4t.version>1.4</si4t.version>
+        <si4t.version>1.5-SNAPSHOT</si4t.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     </properties>
