@@ -113,7 +113,7 @@ public class SolrIndexer implements SearchIndex {
                 throw new ConfigurationException(
                         "Request mode is set to HTTP, but no valid Url collection or the DefaultCoreUrl is present. " +
                                 "Set the Urls collection in the Indexer configuration node, or add the " +
-                                "DeafultCoreAttribute to the IndexerConfiguration");
+                                "DefaultCoreUrl to the IndexerConfiguration");
             }
 
         } else if (requestMode.equalsIgnoreCase("embedded")) {
